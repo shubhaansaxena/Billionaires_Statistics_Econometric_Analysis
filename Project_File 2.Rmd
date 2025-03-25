@@ -1,0 +1,264 @@
+---
+title: 'Project'
+author: "Shubhaan Saxena and William Payne"
+
+date: "3/6/2025"
+output:
+  html_document: default
+  header-includes: \usepackage{color}
+fontsize: 12pt
+margin: 1in
+---
+<!--
+This part is a comment: it won't show in your output. You can use comments to remind you to change the name or the lab number, or a version number. You should use lots of them.  Some excellent economists say that about one quarter of your programs should be comments. Comments are most important in your blocks of code (the grey part of the RMarkdown document)
+-->
+<!--
+This is a starter example for learning to use *R Markdown*. *R Markdown* is used in data journalism, in business, and in the sciences. It will help you create reports by allowing you to alternate text with chunks of code to handle data. 
+
+This starter document has a block of *R* code. The code is in $\color{grey}{grey}$ in the *R Markdown* document itself. Each $\color{grey}{grey}$ chunk has a name (should be different than the names of other chunks, otherwise the Rmd will not **knit**) and some options. By setting "echo=FALSE", message=FALSE, warning=FALSE" the report does not print the code or any message or warnings. However, the report will include the tables and grahs that the code generates.
+The chunk of *R* code in the this Starter Lab generates a histogram and a scatterplot and I've also added a fitted line. 
+
+Clicking the **Knit** button runs all of the *R Markdown* and generates the document. 
+--->
+```{r setup, echo=FALSE, message=F, warning=F}
+#==============================================================================
+#   This chunk will be used for every assignment
+#==============================================================================
+
+  # Clear the working space
+rm(list = ls())
+
+  #Set working directory
+setwd("/Users/shubhaansaxena/OneDrive/Shubhaan_Data/SCU/Winter4/ECON")  
+getwd()
+#setwd("C:/ECON2509")
+
+### Load the packages (all must have been installed)
+
+    library(tidyverse)
+    library(doBy)
+    library(foreign)
+    library(knitr)
+    library(lmtest)
+    library(readstata13)
+    library(sandwich)
+    library(stargazer)
+    library(AER)
+    library(gdata)
+    library(wooldridge)
+    library(openintro)
+    library(readxl)
+    library(corrplot)
+    library(gridExtra)
+    library(dplyr)
+
+
+
+cse=function(reg) {
+    rob=sqrt(diag(vcovHC(reg, type="HC1")))
+    return(rob)
+    }
+
+```
+Abstract: This project's aim is to analyze the relationship between GDP per capita and the number of billionaires across countries. Using regression analysis with both linear and quadratic specifications, we examine how economic prosperity influences extreme wealth concentration. Our findings reveal a U-shaped relationship between GDP per capita and billionaire counts, contradicting simple linear assumptions. F-tests confirm the statistical superiority of quadratic models over linear specifications. The relationship persists even after controlling for outlier countries with exceptionally high billionaire counts. GDP per capita squared, tax rates, education levels, and price stability all demonstrate statistically significant non-linear relationships with billionaire formation. 
+
+Step 1: Load Data
+```{r data, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+# So, we first give an instruction to get the data we want. This chuck of R code is not include in the RMarkdown report because include=FALSE in the setting above. Even if it is not included, it is essential for the R code to know the data before you can plot anything.If you want to include it in the RMarkdown report, you just set it to TRUE.
+
+
+billionaires <- read_csv("billionares.csv") %>% as.data.frame()
+head(billionaires)
+colnames(billionaires) <- make.names(colnames(billionaires))  # Converts column names to R-friendly format
+colnames(billionaires)
+
+names(billionaires)[names(billionaires) == "gross_primary_education_enrollment_country"] <- "primeduc"
+names(billionaires)
+names(billionaires)[names(billionaires) == "gdp_country"] <- "gdp"
+names(billionaires)[names(billionaires) == "population_country"] <- "pop"
+names(billionaires)[names(billionaires) == "col_educ"] <- "coleduc"
+names(billionaires)[names(billionaires) == "tax_revenue_country_country"] <- "taxrev"
+names(billionaires)[names(billionaires) == "life_expectancy_country"] <- "avglifespan"
+names(billionaires)[names(billionaires) == "total_tax_rate_country"] <- "taxrate"
+names(billionaires)[names(billionaires) == "cpi_country"] <- "cpi"
+names(billionaires)[names(billionaires) == "gross_tertiary_education_enrollment"] <- "coleduc"
+
+billionaire_count <- billionaires %>%
+  count(country, name = "num_billionaires")
+billionaires <- billionaires %>%
+  left_join(billionaire_count, by = "country")
+
+head(billionaires)
+print(billionaire_count)
+
+```
+Research Question: What is the causal effect of GDP per capita and billionaire counts across countries, and how do other socioeconomic factors such as tax rates, education levels, and price stability affect this relationship?
+
+Hypothesis: Since GDP per capita is a solid indicator of the economic health of a country, there should be a strong causal effect on the number of billionaires. Countries with more economic activity will likely produce a greater number of billionaires than countries that do not.
+
+We will look at gdp per capita, tax rates, CPI, and the percentage of college educated individuals in the country. We will create both linear and non-linear specifications to identify the nature of the relationship.
+
+Step 2:
+```{r descriptives, echo=FALSE, message=FALSE, warning=FALSE, comment=""}
+
+# Here you write your stargazer command 
+
+# Create a table of descriptive statistics using stargazer command
+
+stargazer(billionaires[c("gdp", "pop", "coleduc", "cpi", "taxrate")], type="text", digits=2, summary.stat=c("n", "mean", "median", "sd"), title="Descriptive Statistics", flip=FALSE, 
+          covariate.labels=c("gdp", "pop", "college educ", "cpi", "taxrate"))
+
+```
+Our table of descriptive statistics includes many of our key variables that we are going to use in regressions. GDP and population will be used in combination in order to observe the GDP per capita. This value is skewed to the left and population is skewed right. The rest of the values are more normal. 
+
+Step 3: 
+
+```{r graphs, echo=FALSE, message=F, warning=FALSE, comment=""}
+
+# Plot GDP per capita and billionaire count
+ggplot(billionaires, aes(x=gdp/pop, y=num_billionaires)) + geom_point(col="blue") + 
+        labs(title = "GDP per capita vs Billionaire Count", x = "GDP/Pop", y = "Count") +
+        stat_smooth(method=lm, col = "red", se=FALSE)
+
+# Correlation Heatmap
+numeric_vars <- billionaires %>%
+  select(finalWorth, age, gdp, 
+         coleduc,
+         taxrate,
+         avglifespan,
+         selfMade)
+
+cor_matrix <- cor(numeric_vars, use = "pairwise.complete.obs")
+
+corrplot(cor_matrix, method = "circle", type = "upper", 
+         tl.col = "black", tl.srt = 45, 
+         title = "Correlation Matrix of Key Variables")
+
+# Plot college education % and number of billionaires
+p <- ggplot(billionaires, aes(x = coleduc, y = num_billionaires)) + geom_point(alpha = 0.6) + stat_function(fun = function(x) 2.4 * x - 7 * x^2 / 1000 + 30, color= "red", size = 1) + labs(title = "College Education vs. Number of Billionaires", x = "College Education (%)",y = "Number of Billionaires") +theme_minimal(base_size = 14)
+print(p)
+
+```
+
+Step 4:
+```{r regressions, echo=FALSE, message=F, warning=FALSE, comment=""}
+# Regressions
+
+reg1 <- lm(num_billionaires~I(gdp/pop), data=billionaires)
+reg2 <- lm(num_billionaires~I(gdp/pop) + taxrate, data=billionaires)
+reg3 <- lm(num_billionaires~I(gdp/pop) + taxrate + coleduc, data=billionaires)
+reg4 <- lm(num_billionaires~I(gdp/pop) + taxrate + coleduc + cpi, data=billionaires)
+reg5 <- lm(num_billionaires~I(gdp/pop) + taxrate + coleduc + cpi + I((gdp/pop)^2), data=billionaires)
+reg6 <- lm(num_billionaires~I(gdp/pop) + taxrate + coleduc + cpi + I((gdp/pop)^2) + I(cpi^2), data=billionaires)
+reg7 <- lm(num_billionaires~I(gdp/pop) + taxrate + coleduc + cpi + I((gdp/pop)^2) + I(cpi^2) + I(taxrate^2), data=billionaires)
+reg8 <- lm(num_billionaires~I(gdp/pop) + taxrate + coleduc + cpi + I((gdp/pop)^2) + I(cpi^2) + I(taxrate^2) + I(coleduc^2), data=billionaires)
+
+stargazer(reg1, reg2, reg3, reg4, reg5, reg6, reg7, reg8, se=list(cse(reg1), cse(reg2), cse(reg3), cse(reg4), cse(reg5), cse(reg6), cse(reg7), cse(reg8)),
+    title="Billionaire", type="text", 
+    star.cutoffs=NA, df=FALSE, digits=3)
+
+anova(reg4, reg8) # To compare the linear model (Model 4) with the non-linear model (Model 8)
+
+# Individual F tests of variables and their non-linear specifications
+linearHypothesis(reg8, "I((gdp/pop)^2) = 0")
+
+linearHypothesis(reg8, "I(cpi^2) = 0")
+
+linearHypothesis(reg8, "I(taxrate^2) = 0")
+
+linearHypothesis(reg8, "I(coleduc^2) = 0")
+
+linearHypothesis(reg8, c("I(gdp/pop) = 0", "I((gdp/pop)^2) = 0"))
+
+linearHypothesis(reg8, c("taxrate = 0", "I(taxrate^2) = 0"))
+
+linearHypothesis(reg8, c("coleduc = 0", "I(coleduc^2) = 0"))
+
+linearHypothesis(reg8, c("cpi = 0", "I(cpi^2) = 0"))
+
+```
+
+In this set of regressions, we are analyzing the dependent variable, the number of billionaires in each country. This will be regressed first against GDP per capita. We are also exploring variables like college enrollment in a country, consumer price index, and tax rates. They are converted into quadratic specifications to see if there is a better specification.
+
+GDP per capita has a statistically significant effect on the number of billionaires in a country. If GDP per capita rises by one dollar, then the number of billionaires rises by .005 on average with all else constant. The variables tax rates, CPI, and college enrollment are included because they are all correlated with GDP per capita. Higher tax rates might discourage things like investment, lowering GDP. Higher consumer price index might lead to lower purchasing power and therefore less economic activity. Higher college enrollment makes more specialized workers who can contribute to economic activity more.
+
+This number rises in the next regression after adding tax rates, showing downward OVB. As tax rate rises by one percent, the number of billionaires rises by 10.524 (on avg with all else constant). The next regressor, college enrollment, reflects upward OVB on GDP per capita. As college enrollment rises by one percent, number of billionaires rises by 1.943 on average with all else equal. The final linear regressor is consumer price index, which increases billionaire count by .654 on avg with all else equal for a rise in one unit itself.
+
+The linear variables are all statistically significant after a t-test at the 5 percent significance level. In the fourth regression, the variables are responsible for 28% of the variation in the billionaire count, and have a residual standard error of 262.384.
+
+To test the significance of our quadratic specification, we conducted F-tests for both individual squared terms and joint significance of linear and squared terms together. Our F-test comparing the linear-only model with the full quadratic model yielded an F-statistic of 106.17 (p < 0.001), indicating that adding all quadratic terms together significantly improves model fit. When testing individual quadratic terms, we found that GDP per capita squared had an F stat of 144.93 and p < 0.001; tax rate squared had an F stat of 103.32 (p < 0.001), which shows that both are highly significant, contrary to earlier t-test results for GDP per capita squared.
+
+College education squared is also significant with F-stat of 62.89 (p < 0.001), while CPI squared actually did not show individual significance. Interestingly, when testing the joint significance of both linear and squared terms for each variable, all four factors showed highly significant relationships with billionaire counts: GDP per capita had an F stat of 299.42 (p < 0.001), tax rate had an F-stat of 208.43 (p < 0.001), college education had an F-stat of 33.79 (p < 0.001), and CPI had an F-stat of 65.21 (p < 0.001). This demonstrates that CPI has a significant overall effect despite its squared term alone not being significant.
+
+Therefore, we can say that the F-tests confirm that the relationship between economic factors and billionaire counts is better expressed as quadratic rather than linear.
+
+Step 5:
+```{r subset, echo=FALSE, message=F, warning=FALSE, comment=""}
+# Regressions without outliers via a subset dataset that removes bilionaires coming from countries with over 150 billionaires
+bill_small=subset(billionaires, num_billionaires<150)
+
+reg1 <- lm(num_billionaires~I(gdp/pop), data=bill_small)
+reg2 <- lm(num_billionaires~I(gdp/pop) + taxrate, data=bill_small)
+reg3 <- lm(num_billionaires~I(gdp/pop) + taxrate + coleduc, data=bill_small)
+reg4 <- lm(num_billionaires~I(gdp/pop) + taxrate + coleduc + cpi, data=bill_small)
+reg5 <- lm(num_billionaires~I(gdp/pop) + taxrate + coleduc + cpi + I((gdp/pop)^2), data=bill_small)
+reg6 <- lm(num_billionaires~I(gdp/pop) + taxrate + coleduc + cpi + I((gdp/pop)^2) + I(cpi^2), data=bill_small)
+reg7 <- lm(num_billionaires~I(gdp/pop) + taxrate + coleduc + cpi + I((gdp/pop)^2) + I(cpi^2) + I(taxrate^2), data=bill_small)
+reg8 <- lm(num_billionaires~I(gdp/pop) + taxrate + coleduc + cpi + I((gdp/pop)^2) + I(cpi^2) + I(taxrate^2) + I(coleduc^2), data=bill_small)
+
+stargazer(reg1, reg2, reg3, reg4, reg5, reg6, reg7, reg8, se=list(cse(reg1), cse(reg2), cse(reg3), cse(reg4), cse(reg5), cse(reg6), cse(reg7), cse(reg8)),
+    title="Billionaire", type="text", 
+    star.cutoffs=NA, df=FALSE, digits=3)
+
+anova(reg4, reg8) # To compare the linear model (Model 4) with the non-linear model (Model 8)
+
+# Individual F tests of variables and their non-linear specifications
+linearHypothesis(reg8, "I((gdp/pop)^2) = 0")
+
+linearHypothesis(reg8, "I(cpi^2) = 0")
+
+linearHypothesis(reg8, "I(taxrate^2) = 0")
+
+linearHypothesis(reg8, "I(coleduc^2) = 0")
+
+linearHypothesis(reg8, c("I(gdp/pop) = 0", "I((gdp/pop)^2) = 0"))
+
+linearHypothesis(reg8, c("taxrate = 0", "I(taxrate^2) = 0"))
+
+linearHypothesis(reg8, c("coleduc = 0", "I(coleduc^2) = 0"))
+
+linearHypothesis(reg8, c("cpi = 0", "I(cpi^2) = 0"))
+
+
+
+```
+Here is an alternative subset with the same regressions. The complete dataset involved outliers (the USA, China, and India) that all had over 150 billionaires in the country. These values were influencing the regressions greatly and leading them to not show the complete causal relationship between our variables of interest. The dataset 'bill_small' limits the billionaire count to 150. The same regressions were re-run.
+
+This new table shows that GDP per capita has no real effect on the billionaire count in a country. However, there are other variables that still have a statistically significant effect on the billionaire count. 
+
+GDP per capita has a statistically significant negative coefficient in the linear models, contrary to expectations. The coefficients range from approximately -23.7 to -26.6 across specifications, with standard errors indicating statistical significance. 
+
+Tax rates show a positive relationship with billionaire counts, with coefficients between 1.1 and 1.8. College education similarly has positive coefficients between 2.4 and 3.2 indicating countries with higher education levels tend to have more billionaires. CPI initially shows a small positive coefficient that increases as more variables are added.
+
+The introduction of quadratic terms dramatically improves model fit, with R-squared increasing from 0.068 in the simplest model to 0.321 in the full specification. GDP per capita squared shows strong positive coefficients around 49.8 to 58.7, indicating a U-shaped relationship. The squared terms for tax rates, CPI, and college education all show negative coefficients which would mean that the relationships are inverted U-shaped.
+
+F-tests strongly support the inclusion of quadratic terms. The comparison between the linear-only model and the full quadratic model yields highly significant results (p < 2.2e-16). When testing individual quadratic terms and joint significance of linear and squared terms together, all factors show statistical significance.
+
+Therefore, we can conclude that the relationship between economic factors and billionaire counts is better expressed as quadratic rather than linear. The final model explains approximately 32% of the variation in billionaire counts across countries.
+
+Step 6: Internal and External Validity
+
+Regarding the external validity of this dataset and our regression analysis -- these results can be generalized to the whole population because we are studying the whole population of billionaires. There are obviously not many in the world and this dataset includes all of them. Additionally, this data is from 2023, so there is likely not a large difference in the population now than from two years ago. There are likely not any regulatory differences nor differences in enviornment between now and 2023. One technology that might have affected the real-world population is the development of artificial intelligence, but by this point it was already in use.
+
+Internal validity:
+In our regressions, there are likely omitted variables that are correlated with our explanatory variables and affect the outcome. There are many factors that contribute to the number of billionaires in a country, and it would be difficult to analyze all of them. One, however, is the level of foreign direct investment (FDI) of a country. There is a possible positive correlation because FDI helps productivity, and FDI has a multitude of ways it could influence billionaire count. Entrepreneurs can benefit by the increased capital and personnel from FDI, pushing them into billionaire status.
+
+We have tried to account for functional form by including quadratic terms in our regressions. These have returned statistically signifcant coefficients and more favorable measures of fit. Additionally, these regressions are also statistically significant using F-Tests. Our question and hypothesis asks for the number (continuous), so there is no benefit to using a discrete dependent variable.
+
+Much information about billionaires, their net worth, and their industries are available to the public. Unless they manage to have their true net worth hidden (by some kind of weird, illegal means), then there are no worries about intentionally false reports. The data was also not collected by survey and country information like GDP and population is public as well.
+
+Regarding sample selection bias and missing data -- we cleaned the data for missing values. These values were not based on the value of our dependent variables (idk shubhaan continue this one)
+
+There is statistically significant evidence that GDP per capita has a causal relationship with billionaire count. However, billionaires are continuously investing in businesses, employing people, and have other means of economic influence. These facets of the economy can lead to higher productivity and GDP per capita. 
+
